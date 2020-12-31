@@ -1,6 +1,6 @@
 TARGET	= kaleidoscope_cc
 
-Q ?= @
+Q ?= @ 
 PREFIX ?= 
 
 INC_DIR = inc
@@ -20,11 +20,13 @@ AS  = ${PREFIX}gcc -x assembler-with-cpp
 CP  = ${PREFIX}objcopy
 OD  = ${PREFIX}objdump
 SZ  = ${PREFIX}size
+LLVM_CONFIG=/home/mix/Desktop/PL/llvm_install/bin/llvm-config
+LLVM_INCLUDE=/home/mix/Desktop/PL/llvm_install/include/
 
 CXXFLAGS = -Wall -std=c++17 -O0 -g
-CXXFLAGS += -I./$(INC_DIR)
+CXXFLAGS += -I./$(INC_DIR) -I$(LLVM_INCLUDE) $(shell $(LLVM_CONFIG) --cxxflags)
 
-LFLAGS  = -L./$(OUT_DIR)/$(LIB_DIR)
+LFLAGS  = -L./$(OUT_DIR)/$(LIB_DIR) $(shell $(LLVM_CONFIG) --ldflags --system-libs --libs core)
 
 all : mkobjdir $(TARGET)
 

@@ -221,26 +221,41 @@ static std::unique_ptr<Expr_AST> parse_expression() {
 }
 
 static void handle_definition() {
-    if (parse_definition())
-        fprintf(stderr, "Parsed a function definition.\n");
-    else
+    if (auto fn_ast = parse_definition()) {
+        if (auto* fn_ir = fn_ast->codegen()) {
+            fprintf(stderr, "Read function definition: ");
+            fn_ir->print(errs());
+            fprintf(stderr, "\n");
+        }
+    } else
         // Skip token for error recovery.
         get_next_token();
 }
 
 static void handle_extern() {
-    if (parse_extern())
-        fprintf(stderr, "Parsed an extern.\n");
-    else
+    if (auto proto_ast = parse_extern()) {
+        if (auto* fn_ir = proto_ast->codegen()) {
+            fprintf(stderr, "Read extern: ");
+            fn_ir->print(errs());
+            fprintf(stderr, "\n");
+        }
+    } else
         // Skip token for error recovery.
         get_next_token();
 }
 
 static void handle_top_level_expression() {
     // Evaluate a top-level expression into an anonymous function.
-    if (parse_top_level_expr())
-        fprintf(stderr, "Parsed a top-level expression.\n");
-    else
+    if (auto fn_ast = parse_top_level_expr()) {
+        if (auto* fn_ir = fn_ast->codegen()) {
+            fprintf(stderr, "Read top-level expression: ");
+            fn_ir->print(errs());
+            fprintf(stderr, "\n");
+
+            // Remove the anonymous expression
+            fn_ir->eraseFromParent();
+        }
+    } else
         // Skip token for error recovery.
         get_next_token();
 }

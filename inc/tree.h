@@ -4,10 +4,31 @@
 #include <memory>
 #include <vector>
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/Value.h"
+
+using namespace llvm;
+
+extern std::unique_ptr<LLVMContext> the_context;
+extern std::unique_ptr<Module> the_module;
+extern std::unique_ptr<IRBuilder<>> builder;
+extern std::map<std::string, Value*> named_values;
+
 // ExprAST - Base class for all expr nodes.
 class Expr_AST {
 public:
     virtual ~Expr_AST() {}
+    virtual Value* codegen() = 0;
 };
 
 // Number_expr_AST - Expression class for numeric literals like "1.0".
@@ -16,6 +37,7 @@ class Number_expr_AST : public Expr_AST {
 
 public:
     Number_expr_AST(double val) : val(val) {}
+    Value* codegen() override;
 };
 
 // Variable_expr_AST - Expression class for referencing a variable, like "a".
@@ -24,6 +46,7 @@ class Variable_expr_AST : public Expr_AST {
 
 public:
     Variable_expr_AST(const std::string& name) : name(name) {}
+    Value* codegen() override;
 };
 
 // Binary_expr_AST - Expression class for a binary operator.
@@ -36,6 +59,7 @@ public:
     Binary_expr_AST(char op, std::unique_ptr<Expr_AST> lhs,
                     std::unique_ptr<Expr_AST> rhs)
         : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+    Value* codegen() override;
 };
 
 // Call_expr_AST - Expression class for function calls.
@@ -47,6 +71,7 @@ public:
     Call_expr_AST(const std::string& callee,
                   std::vector<std::unique_ptr<Expr_AST>> args)
         : callee(callee), args(std::move(args)) {}
+    Value* codegen() override;
 };
 
 // Prototype_AST - this class represents the "prototype" for a function,
@@ -59,6 +84,7 @@ class Prototype_AST {
 public:
     Prototype_AST(const std::string& name, std::vector<std::string> args)
         : name(name), args(std::move(args)) {}
+    Function* codegen();
 
     const std::string& get_name() const { return name; }
 };
@@ -72,6 +98,7 @@ public:
     Function_AST(std::unique_ptr<Prototype_AST> proto,
                  std::unique_ptr<Expr_AST> body)
         : proto(std::move(proto)), body(std::move(body)) {}
+    Function* codegen();
 };
 
 #endif // __TREE_H
