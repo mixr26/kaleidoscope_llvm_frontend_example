@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdio>
 #include <memory>
 
@@ -7,7 +8,7 @@
 // cur_tok/get_next_token - Provide a simple token buffer. cur_tok is the
 // current token the parser is looking a. get_next_token reads another token
 // from the lexer and updates cur_tok with its results.
-static int cur_tok;
+int cur_tok;
 
 static std::unique_ptr<Expr_AST> parse_expression();
 
@@ -183,7 +184,7 @@ static std::unique_ptr<Prototype_AST> parse_prototype() {
 }
 
 // definition ::= 'def' prototype exptression
-static std::unique_ptr<Function_AST> parse_definition() {
+std::unique_ptr<Function_AST> parse_definition() {
     get_next_token();
     auto proto = parse_prototype();
     if (!proto)
@@ -195,16 +196,16 @@ static std::unique_ptr<Function_AST> parse_definition() {
 }
 
 // external ::= 'extern' prototype
-static std::unique_ptr<Prototype_AST> parse_extern() {
+std::unique_ptr<Prototype_AST> parse_extern() {
     get_next_token(); // Eat 'extern'.
     return parse_prototype();
 }
 
 // toplevelexpr ::= expression
-static std::unique_ptr<Function_AST> parse_top_level_expr() {
+std::unique_ptr<Function_AST> parse_top_level_expr() {
     if (auto e = parse_expression()) {
         // Make an anonymous prototype.
-        auto proto = std::make_unique<Prototype_AST>("", std::vector<std::string>());
+        auto proto = std::make_unique<Prototype_AST>("__anon_expr", std::vector<std::string>());
         return std::make_unique<Function_AST>(std::move(proto), std::move(e));
     }
     return nullptr;
@@ -218,67 +219,4 @@ static std::unique_ptr<Expr_AST> parse_expression() {
         return nullptr;
 
     return parse_binop_rhs(0, std::move(lhs));
-}
-
-static void handle_definition() {
-    if (auto fn_ast = parse_definition()) {
-        if (auto* fn_ir = fn_ast->codegen()) {
-            fprintf(stderr, "Read function definition: ");
-            fn_ir->print(errs());
-            fprintf(stderr, "\n");
-        }
-    } else
-        // Skip token for error recovery.
-        get_next_token();
-}
-
-static void handle_extern() {
-    if (auto proto_ast = parse_extern()) {
-        if (auto* fn_ir = proto_ast->codegen()) {
-            fprintf(stderr, "Read extern: ");
-            fn_ir->print(errs());
-            fprintf(stderr, "\n");
-        }
-    } else
-        // Skip token for error recovery.
-        get_next_token();
-}
-
-static void handle_top_level_expression() {
-    // Evaluate a top-level expression into an anonymous function.
-    if (auto fn_ast = parse_top_level_expr()) {
-        if (auto* fn_ir = fn_ast->codegen()) {
-            fprintf(stderr, "Read top-level expression: ");
-            fn_ir->print(errs());
-            fprintf(stderr, "\n");
-
-            // Remove the anonymous expression
-            fn_ir->eraseFromParent();
-        }
-    } else
-        // Skip token for error recovery.
-        get_next_token();
-}
-
-// top ::= definition | external | expression | ';'
-void main_loop() {
-    while (true) {
-        fprintf(stderr, "ready> ");
-        switch (cur_tok) {
-        case static_cast<int>(Token::TOK_EOF):
-            return;
-        case ';': // Ignore top-level semicolons.
-            get_next_token();
-            break;
-        case static_cast<int>(Token::TOK_DEF):
-            handle_definition();
-            break;
-        case static_cast<int>(Token::TOK_EXTERN):
-            handle_extern();
-            break;
-        default:
-            handle_top_level_expression();
-            break;
-        }
-    }
 }

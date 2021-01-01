@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "KaleidoscopeJIT.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
@@ -13,16 +14,24 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/Value.h"
 
 using namespace llvm;
+using namespace llvm::orc;
 
-extern std::unique_ptr<LLVMContext> the_context;
+// Forward decl.
+class Prototype_AST;
+
+extern LLVMContext the_context;
 extern std::unique_ptr<Module> the_module;
-extern std::unique_ptr<IRBuilder<>> builder;
+extern IRBuilder<> builder;
 extern std::map<std::string, Value*> named_values;
+extern std::unique_ptr<legacy::FunctionPassManager> the_fpm;
+extern std::unique_ptr<KaleidoscopeJIT> the_jit;
+extern std::map<std::string, std::unique_ptr<Prototype_AST>> function_protos;
 
 // ExprAST - Base class for all expr nodes.
 class Expr_AST {
