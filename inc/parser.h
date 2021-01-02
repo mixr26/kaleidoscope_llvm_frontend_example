@@ -16,4 +16,6 @@ std::unique_ptr<Function_AST> parse_definition();
 std::unique_ptr<Prototype_AST> parse_extern();
 std::unique_ptr<Function_AST> parse_top_level_expr();
 
+extern std::map<char, int> binop_precedence;
+
 #endif // __PARSER_H

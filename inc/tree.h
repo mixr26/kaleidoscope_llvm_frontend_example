@@ -58,6 +58,18 @@ public:
     Value* codegen() override;
 };
 
+// Unary_expr_AST - Expression class for a unary operator.
+class Unary_expr_AST : public Expr_AST {
+    char opcode;
+    std::unique_ptr<Expr_AST> operand;
+
+public:
+    Unary_expr_AST(char opcode, std::unique_ptr<Expr_AST> operand)
+        : opcode(opcode), operand(std::move(operand)) {}
+
+    Value* codegen() override;
+};
+
 // Binary_expr_AST - Expression class for a binary operator.
 class Binary_expr_AST : public Expr_AST {
     char op;
@@ -121,13 +133,27 @@ public:
 class Prototype_AST {
     std::string name;
     std::vector<std::string> args;
+    bool is_operator;
+    uint32_t precedence; // If this is a binary op.
 
 public:
-    Prototype_AST(const std::string& name, std::vector<std::string> args)
-        : name(name), args(std::move(args)) {}
-    Function* codegen();
+    Prototype_AST(const std::string& name, std::vector<std::string> args,
+                  bool is_operator = false, uint32_t prec = 0)
+        : name(name), args(std::move(args)), is_operator(is_operator),
+          precedence(prec) {}
 
+    Function* codegen();
     const std::string& get_name() const { return name; }
+
+    bool is_unary_op() const { return is_operator && args.size() == 1; }
+    bool is_binary_op() const { return is_operator && args.size() == 2; }
+
+    char get_operator_name() const {
+        assert(is_unary_op() || is_binary_op());
+        return name[name.size() - 1];
+    }
+
+    uint32_t get_binary_precedence() const { return precedence; }
 };
 
 // Function_AST - This class represents a function definition itself.

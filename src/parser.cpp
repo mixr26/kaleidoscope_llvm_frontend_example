@@ -14,7 +14,7 @@ static std::unique_ptr<Expr_AST> parse_expression();
 
 // binop_precedence - This holds the precedence for each binary operator that is
 // defined.
-static std::map<char, int> binop_precedence{
+std::map<char, int> binop_precedence {
     std::pair<char, int>('<', 10),
     std::pair<char, int>('+', 20),
     std::pair<char, int>('-', 20),
@@ -202,8 +202,24 @@ static int get_tok_precedence() {
     return tok_prec;
 }
 
+// unary
+//      ::= primary
+//      ::= '!' unary
+static std::unique_ptr<Expr_AST> parse_unary() {
+    // If the current token is not an operator, it must be a primary expr.
+    if (!isascii(cur_tok) || cur_tok == '(' || cur_tok == ',')
+        return parse_primary();
+
+    // If this is a unary operator, read it.
+    int32_t opc = cur_tok;
+    get_next_token();
+    if (auto operand = parse_unary())
+        return std::make_unique<Unary_expr_AST>(opc, std::move(operand));
+    return nullptr;
+}
+
 // binoprhs
-//      ::= ('+' primary)*
+//      ::= ('+' unary)*
 static std::unique_ptr<Expr_AST> parse_binop_rhs(int expr_prec,
                                                  std::unique_ptr<Expr_AST> lhs) {
     // If this is a binop, find its precedence.
@@ -220,7 +236,7 @@ static std::unique_ptr<Expr_AST> parse_binop_rhs(int expr_prec,
         get_next_token(); // Eat binop.
 
         // Parse the primary expression after the binary operator.
-        auto rhs = parse_primary();
+        auto rhs = parse_unary();
         if (!rhs)
             return nullptr;
 
@@ -241,12 +257,49 @@ static std::unique_ptr<Expr_AST> parse_binop_rhs(int expr_prec,
 
 // prototype
 //      ::= id '(' id* ')
+//      ::= binary LETTER number? (id, id)
+//      ::= unary LETTER (id)
 static std::unique_ptr<Prototype_AST> parse_prototype() {
-    if (cur_tok != static_cast<int>(Token::TOK_IDENTIFIER))
-        return log_error_p("Expected function name in prototype.");
+    std::string fn_name;
 
-    std::string fn_name = identifier_str;
-    get_next_token();
+    uint32_t kind = 0; // 0 = identifier, 1 = unary, 2 = binary.
+    uint32_t binary_precedence = 30;
+
+    switch (cur_tok) {
+    default:
+        return log_error_p("Expected function name in prototype.");
+    case static_cast<int>(Token::TOK_IDENTIFIER):
+        fn_name = identifier_str;
+        kind = 0;
+        get_next_token();
+        break;
+    case static_cast<int>(Token::TOK_UNARY):
+        get_next_token();
+        if (!isascii(cur_tok))
+            return log_error_p("Expected unary operator.");
+        fn_name = "unary";
+        fn_name += static_cast<char>(cur_tok);
+        kind = 1;
+        get_next_token();
+        break;
+    case static_cast<int>(Token::TOK_BINARY):
+        get_next_token();
+        if (!isascii(cur_tok))
+            return log_error_p("Expected binary operator.");
+        fn_name = "binary";
+        fn_name += static_cast<char>(cur_tok);
+        kind = 2;
+        get_next_token();
+
+        // Read the precedence if present.
+        if (cur_tok == static_cast<int>(Token::TOK_NUMBER)) {
+            if (num_val < 1 || num_val > 100)
+                return log_error_p("Invalid precedence: must be 1..100.");
+            binary_precedence = static_cast<uint32_t>(num_val);
+            get_next_token();
+        }
+        break;
+    }
 
     if (cur_tok != '(')
         return log_error_p("Expected '(' in prototype.");
@@ -261,7 +314,12 @@ static std::unique_ptr<Prototype_AST> parse_prototype() {
     // Success.
     get_next_token(); // Eat ')'.
 
-    return std::make_unique<Prototype_AST>(fn_name, std::move(arg_names));
+    // Verify right number of names for operator.
+    if (kind && arg_names.size() != kind)
+        return log_error_p("Invalid number of operands for operator.");
+
+    return std::make_unique<Prototype_AST>(fn_name, std::move(arg_names),
+                                           kind != 0, binary_precedence);
 }
 
 // definition ::= 'def' prototype exptression
@@ -293,9 +351,9 @@ std::unique_ptr<Function_AST> parse_top_level_expr() {
 }
 
 // expression
-//      ::= primary binoprhs
+//      ::= unary binoprhs
 static std::unique_ptr<Expr_AST> parse_expression() {
-    auto lhs = parse_primary();
+    auto lhs = parse_unary();
     if (!lhs)
         return nullptr;
 

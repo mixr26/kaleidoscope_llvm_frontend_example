@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "tree.h"
+#include "parser.h"
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -12,6 +13,8 @@ std::map<std::string, Value*> named_values;
 std::unique_ptr<legacy::FunctionPassManager> the_fpm;
 std::unique_ptr<KaleidoscopeJIT> the_jit;
 std::map<std::string, std::unique_ptr<Prototype_AST>> function_protos;
+
+Function* get_function(std::string name);
 
 static Value* log_error_v(const char* str) {
     fprintf(stderr, "log_error: %s\n", str);
@@ -28,6 +31,18 @@ Value* Variable_expr_AST::codegen() {
     if (!v)
         log_error_v("Unknown variable name.");
     return v;
+}
+
+Value* Unary_expr_AST::codegen() {
+    Value* operand_v = operand->codegen();
+    if (!operand_v)
+        return nullptr;
+
+    Function* f = get_function(std::string("unary") + opcode);
+    if (!f)
+        return log_error_v("Unknown unary operator.");
+
+    return builder.CreateCall(f, operand_v, "unop");
 }
 
 Value* Binary_expr_AST::codegen() {
@@ -50,8 +65,16 @@ Value* Binary_expr_AST::codegen() {
         return builder.CreateUIToFP(l, Type::getDoubleTy(the_context),
                                     "booltmp");
     default:
-        return log_error_v("Invalid binary operator.");
+        break;
     }
+
+    // If it wasn't a builtin binary operator, it must be a user defined one.
+    // Emit a call to it.
+    Function* f = get_function(std::string("binary") + op);
+    assert(f && "binary operator not found!");
+
+    Value* ops[2] = { l, r };
+    return builder.CreateCall(f, ops, "binop");
 }
 
 Value* If_expr_AST::codegen() {
@@ -249,6 +272,10 @@ Function* Function_AST::codegen() {
 
     if (!the_function)
         return nullptr;
+
+    // If this is an operator, install it.
+    if (p.is_binary_op())
+        binop_precedence[p.get_operator_name()] = p.get_binary_precedence();
 
     // Create a new basic block to start insertion into.
     BasicBlock* bb = BasicBlock::Create(the_context, "entry", the_function);
