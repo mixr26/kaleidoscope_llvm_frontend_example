@@ -92,10 +92,87 @@ static std::unique_ptr<Expr_AST> parse_identifier_expr() {
     return std::make_unique<Call_expr_AST>(id_name, std::move(args));
 }
 
+// ifexpr ::= 'if' expression 'then' expression 'else' expression
+static std::unique_ptr<Expr_AST> parse_if_expr() {
+    get_next_token(); // Eat the 'if'.
+
+    // Condition.
+    auto cond = parse_expression();
+    if (!cond)
+        return nullptr;
+
+    if (cur_tok != static_cast<int>(Token::TOK_THEN))
+        return log_error("Expected then.");
+    get_next_token(); // Eat the 'then'.
+
+    auto then = parse_expression();
+    if (!then)
+        return nullptr;
+
+    if (cur_tok != static_cast<int>(Token::TOK_ELSE))
+        return log_error("Expected else.");
+    get_next_token(); // Eat the else.
+
+    auto elze = parse_expression();
+    if (!elze)
+        return nullptr;
+
+    return std::make_unique<If_expr_AST>(std::move(cond), std::move(then),
+                                         std::move(elze));
+}
+
+// forexpr ::= 'for' indentifier '=' expr (',' expr)? 'in' expression
+static std::unique_ptr<Expr_AST> parse_for_expr() {
+    get_next_token(); // Eat the 'for'.
+
+    if (cur_tok != static_cast<int>(Token::TOK_IDENTIFIER))
+        return log_error("Expected identifier after for.");
+
+    std::string id_name = identifier_str;
+    get_next_token(); // Eat the identifier.
+
+    if (cur_tok != '=')
+        return log_error("Expected '=' after 'for'.");
+    get_next_token(); // Eat the '='.
+
+    auto start = parse_expression();
+    if (!start)
+        return nullptr;
+    if (cur_tok != ',')
+        return log_error("Expected ',' after for start value.");
+    get_next_token();
+
+    auto end = parse_expression();
+    if (!end)
+        return nullptr;
+
+    // The step value is optional.
+    std::unique_ptr<Expr_AST> step;
+    if (cur_tok == ',') {
+        get_next_token();
+        step = parse_expression();
+        if (!step)
+            return nullptr;
+    }
+
+    if (cur_tok != static_cast<int>(Token::TOK_IN))
+        return log_error("Expected 'in' after for.");
+    get_next_token(); // Eat the 'in'.
+
+    auto body = parse_expression();
+    if (!body)
+        return nullptr;
+
+    return std::make_unique<For_expr_AST>(id_name, std::move(start),
+                                          std::move(end), std::move(step),
+                                          std::move(body));
+}
+
 // primary
 //      ::= identifierexpr
 //      ::= numberexpr
 //      ::= parenexpr
+//      ::= ifexpr
 static std::unique_ptr<Expr_AST> parse_primary() {
     switch (cur_tok) {
     default:
@@ -106,6 +183,10 @@ static std::unique_ptr<Expr_AST> parse_primary() {
         return parse_number_expr();
     case '(':
         return parse_paren_expr();
+    case static_cast<int>(Token::TOK_IF):
+        return parse_if_expr();
+    case static_cast<int>(Token::TOK_FOR):
+        return parse_for_expr();
     }
 }
 

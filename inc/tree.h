@@ -83,6 +83,38 @@ public:
     Value* codegen() override;
 };
 
+// If_expr_AST - Expression class for if/then/else.
+class If_expr_AST : public Expr_AST {
+    std::unique_ptr<Expr_AST> cond;
+    std::unique_ptr<Expr_AST> then;
+    std::unique_ptr<Expr_AST> elze;
+
+public:
+    If_expr_AST(std::unique_ptr<Expr_AST> cond, std::unique_ptr<Expr_AST>(then),
+                std::unique_ptr<Expr_AST> elze)
+        : cond(std::move(cond)), then(std::move(then)), elze(std::move(elze)) {}
+
+    Value* codegen() override;
+};
+
+// For_expr_AST - Expression class for for/in.
+class For_expr_AST : public Expr_AST {
+    std::string var_name;
+    std::unique_ptr<Expr_AST> start;
+    std::unique_ptr<Expr_AST> end;
+    std::unique_ptr<Expr_AST> step;
+    std::unique_ptr<Expr_AST> body;
+
+public:
+    For_expr_AST(const std::string& var_name, std::unique_ptr<Expr_AST> start,
+                 std::unique_ptr<Expr_AST> end, std::unique_ptr<Expr_AST> step,
+                 std::unique_ptr<Expr_AST> body)
+        : var_name(var_name), start(std::move(start)), end(std::move(end)),
+          step(std::move(step)), body(std::move(body)) {}
+
+    Value* codegen() override;
+};
+
 // Prototype_AST - this class represents the "prototype" for a function,
 // which captures its name, and its argument names (thus implicitly the
 // number of arguments the function takes).

@@ -24,6 +24,16 @@ int gettok() {
             return static_cast<int>(Token::TOK_DEF);
         if (identifier_str == "extern")
             return static_cast<int>(Token::TOK_EXTERN);
+        if (identifier_str == "if")
+            return static_cast<int>(Token::TOK_IF);
+        if (identifier_str == "else")
+            return static_cast<int>(Token::TOK_ELSE);
+        if (identifier_str == "then")
+            return static_cast<int>(Token::TOK_THEN);
+        if (identifier_str == "for")
+            return static_cast<int>(Token::TOK_FOR);
+        if (identifier_str == "in")
+            return static_cast<int>(Token::TOK_IN);
         return static_cast<int>(Token::TOK_IDENTIFIER);
     }
 

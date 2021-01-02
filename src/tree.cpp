@@ -54,6 +54,141 @@ Value* Binary_expr_AST::codegen() {
     }
 }
 
+Value* If_expr_AST::codegen() {
+    Value* cond_v = cond->codegen();
+    if (!cond_v)
+        return nullptr;
+
+    // Convert condition to a bool by comparing non-equal to 0.0.
+    cond_v = builder.CreateFCmpONE(cond_v,
+                                   ConstantFP::get(the_context, APFloat(0.0)),
+                                   "ifcond");
+
+    Function* the_function = builder.GetInsertBlock()->getParent();
+
+    // Create blocks for the then and else cases. Insert the 'then' block at
+    // the end of the function.
+    BasicBlock* then_bb = BasicBlock::Create(the_context, "then", the_function);
+    BasicBlock* else_bb = BasicBlock::Create(the_context, "else");
+    BasicBlock* merge_bb = BasicBlock::Create(the_context, "ifcont");
+
+    builder.CreateCondBr(cond_v, then_bb, else_bb);
+
+    // Emit then value.
+    builder.SetInsertPoint(then_bb);
+
+    Value* then_v = then->codegen();
+    if (!then_v)
+        return nullptr;
+
+    builder.CreateBr(merge_bb);
+    // Codegen of 'then' can change the current block, update then_bb
+    // for the PHI.
+    then_bb = builder.GetInsertBlock();
+
+    // Emit else block.
+    the_function->getBasicBlockList().push_back(else_bb);
+    builder.SetInsertPoint(else_bb);
+
+    Value* else_v = elze->codegen();
+    if (!else_v)
+        return nullptr;
+
+    builder.CreateBr(merge_bb);
+    // Codege of 'else' can change the current block, update else_bb
+    // for the PHI.
+    else_bb = builder.GetInsertBlock();
+
+    // Emit merge block.
+    the_function->getBasicBlockList().push_back(merge_bb);
+    builder.SetInsertPoint(merge_bb);
+    PHINode* pn = builder.CreatePHI(Type::getDoubleTy(the_context), 2, "iftmp");
+    pn->addIncoming(then_v, then_bb);
+    pn->addIncoming(else_v, else_bb);
+
+    return pn;
+}
+
+Value* For_expr_AST::codegen() {
+    // Emit the start code first, without 'variable' in scope.
+    Value* start_val = start->codegen();
+    if (!start_val)
+        return nullptr;
+
+    // Make the new basic block for the loop header, inserting after current
+    // block.
+    Function* the_function = builder.GetInsertBlock()->getParent();
+    BasicBlock* preheader_bb = builder.GetInsertBlock();
+    BasicBlock* loop_bb = BasicBlock::Create(the_context, "loop", the_function);
+
+    // Insert an explicit fall through from the current block to the loop_bb.
+    builder.CreateBr(loop_bb);
+
+    // Start insertion in loop_bb;
+    builder.SetInsertPoint(loop_bb);
+
+    // Start the PHI node with an entry for start.
+    PHINode* variable = builder.CreatePHI(Type::getDoubleTy(the_context),
+                                          2, var_name.c_str());
+    variable->addIncoming(start_val, preheader_bb);
+
+    // Within the loop, the variable is defined equal to the PHI node. If it
+    // shadows an existing variable, we have to restore it, so save it now.
+    Value* old_val = named_values[var_name];
+    named_values[var_name] = variable;
+
+    // Emit the body of the loop. This, like any other expr, can change the
+    // current BB. Note that we ignore the value computed by the body, but
+    // don't allow an error.
+    if (!body->codegen())
+        return nullptr;
+
+    // Emit the step value.
+    Value* step_val = nullptr;
+    if (step) {
+        step_val = step->codegen();
+        if (!step_val)
+            return nullptr;
+    } else
+        // If not specified, use 1.0.
+        step_val = ConstantFP::get(the_context, APFloat(1.0));
+
+    Value* next_var = builder.CreateFAdd(variable, step_val, "nextvar");
+
+    // Compute the end condition.
+    Value* end_cond = end->codegen();
+    if (!end_cond)
+        return nullptr;
+
+    // Convert condition to a bool by comparing non-equal to 0.0.
+    end_cond = builder.CreateFCmpONE(end_cond,
+                                     ConstantFP::get(the_context, APFloat(0.0)),
+                                     "loopcond");
+
+    // Create the "after loop" block and insert it.
+    BasicBlock* loop_end_bb = builder.GetInsertBlock();
+    BasicBlock* after_bb =
+            BasicBlock::Create(the_context, "afterloop", the_function);
+
+    // Insert the conditional branch into the end of loop_end_bb;
+    builder.CreateCondBr(end_cond, loop_bb, after_bb);
+
+    // Any new code will be inserted inf after_bb.
+    builder.SetInsertPoint(after_bb);
+
+    // Add a new entry tp the PHI node for the backedge.
+    variable->addIncoming(next_var, loop_end_bb);
+
+    // Restore the unshadowed variable.
+    if (old_val)
+        named_values[var_name] = old_val;
+    else
+        named_values.erase(var_name);
+
+    // For expr always returns 0.0.
+    return Constant::getNullValue(Type::getDoubleTy(the_context));
+}
+
 Function* get_function(std::string name) {
     // First, see if the function has already been added to the current module.
     if (auto* f = the_module->getFunction(name))
