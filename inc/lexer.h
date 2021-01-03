@@ -16,7 +16,9 @@ enum class Token : int {
     TOK_IN = -10,
     // Operators
     TOK_BINARY = -11,
-    TOK_UNARY = -12
+    TOK_UNARY = -12,
+    // Var
+    TOK_VAR = -13
 };
 
 // Filled in if TOK_IDENTIFIER.

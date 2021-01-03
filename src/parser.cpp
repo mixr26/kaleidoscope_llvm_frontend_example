@@ -15,6 +15,7 @@ static std::unique_ptr<Expr_AST> parse_expression();
 // binop_precedence - This holds the precedence for each binary operator that is
 // defined.
 std::map<char, int> binop_precedence {
+    std::pair<char, int>('=', 2),
     std::pair<char, int>('<', 10),
     std::pair<char, int>('+', 20),
     std::pair<char, int>('-', 20),
@@ -168,6 +169,55 @@ static std::unique_ptr<Expr_AST> parse_for_expr() {
                                           std::move(body));
 }
 
+// varexpr ::= 'var' identifier ('=' expression)?
+//                      (',' identifier ('=' expression)?)* 'in' expression
+static std::unique_ptr<Expr_AST> parse_var_expr() {
+    get_next_token(); // Eat the 'var'.
+
+    std::vector<std::pair<std::string, std::unique_ptr<Expr_AST>>> var_names;
+
+    // At least one variable is required.
+    if (cur_tok != static_cast<int>(Token::TOK_IDENTIFIER))
+        return log_error("Expected identifier after 'var'.");
+
+    while (true) {
+        std::string name = identifier_str;
+        get_next_token(); // Eat identifier.
+
+        // Read the optional initializer.
+        std::unique_ptr<Expr_AST> init;
+        if (cur_tok == '=') {
+            get_next_token(); // Eat the '='.
+
+            init = parse_expression();
+            if (!init)
+                return nullptr;
+        }
+
+        var_names.emplace_back(std::make_pair(name, std::move(init)));
+
+        // End of var list, exit loop.
+        if (cur_tok != ',')
+            break;
+        get_next_token();
+
+        if (cur_tok != static_cast<int>(Token::TOK_IDENTIFIER))
+            return log_error("Expected identifier list after 'var'.");
+    }
+
+    // At this point, we have to have 'in'.
+    if (cur_tok != static_cast<int>(Token::TOK_IN))
+        return log_error("Expected 'in' keyword after 'var'.");
+    get_next_token(); // Eat the 'in'.
+
+    auto body = parse_expression();
+    if (!body)
+        return nullptr;
+
+    return std::make_unique<Var_expr_AST>(std::move(var_names),
+                                          std::move(body));
+}
+
 // primary
 //      ::= identifierexpr
 //      ::= numberexpr
@@ -187,6 +237,8 @@ static std::unique_ptr<Expr_AST> parse_primary() {
         return parse_if_expr();
     case static_cast<int>(Token::TOK_FOR):
         return parse_for_expr();
+    case static_cast<int>(Token::TOK_VAR):
+        return parse_var_expr();
     }
 }
 

@@ -9,7 +9,7 @@ using namespace llvm::orc;
 LLVMContext the_context;
 std::unique_ptr<Module> the_module;
 IRBuilder<> builder(the_context);
-std::map<std::string, Value*> named_values;
+std::map<std::string, AllocaInst*> named_values;
 std::unique_ptr<legacy::FunctionPassManager> the_fpm;
 std::unique_ptr<KaleidoscopeJIT> the_jit;
 std::map<std::string, std::unique_ptr<Prototype_AST>> function_protos;
@@ -21,6 +21,14 @@ static Value* log_error_v(const char* str) {
     return nullptr;
 }
 
+static AllocaInst* create_entry_block_alloca(Function* the_function,
+                                             const std::string& var_name) {
+    IRBuilder<> tmp_b(&the_function->getEntryBlock(),
+                      the_function->getEntryBlock().begin());
+    return tmp_b.CreateAlloca(Type::getDoubleTy(the_context), 0,
+                              var_name.c_str());
+}
+
 Value* Number_expr_AST::codegen() {
     return ConstantFP::get(the_context, APFloat(val));
 }
@@ -30,7 +38,9 @@ Value* Variable_expr_AST::codegen() {
     Value* v = named_values[name];
     if (!v)
         log_error_v("Unknown variable name.");
-    return v;
+
+    // Load the value.
+    return builder.CreateLoad(v, name.c_str());
 }
 
 Value* Unary_expr_AST::codegen() {
@@ -46,6 +56,27 @@ Value* Unary_expr_AST::codegen() {
 }
 
 Value* Binary_expr_AST::codegen() {
+    // Special case '=', because we don't want to emit the LHS as an expression.
+    if (op == '=') {
+        // Assignment requires the LHS to be an identifier.
+        Variable_expr_AST* lhse = (Variable_expr_AST*)lhs.get();
+        if (!lhse)
+            return log_error_v("Destination of '=' must be a variable.");
+
+        // Codegen the RHS.
+        Value* val = rhs->codegen();
+        if (!val)
+            return nullptr;
+
+        // Look up the name.
+        Value* variable = named_values[lhse->get_name()];
+        if (!variable)
+            return log_error_v("Unknown variable name.");
+
+        builder.CreateStore(val, variable);
+        return val;
+    }
+
     Value* l = lhs->codegen();
     Value* r = rhs->codegen();
 
@@ -132,16 +163,42 @@ Value* If_expr_AST::codegen() {
     return pn;
 }
 
+// Output for-loop as:
+//  var = alloca double
+//  ...
+//  start = startexpr
+//  store start -> var
+//  goto loop
+// loop:
+//  ...
+//  bodyexpr
+//  ...
+// loopend:
+//  step = stepexpr
+//  endcond = endexpr
+//
+//  curvar = load var
+//  nextvar = curvar + step
+//  store nextvar -> va
+//  br endcond, loop, endloop
+// endloop:
+//  ...
 Value* For_expr_AST::codegen() {
+    Function* the_function = builder.GetInsertBlock()->getParent();
+
+    // Create an alloca for the variable in the entry block.
+    AllocaInst* alloca_var = create_entry_block_alloca(the_function, var_name);
+
     // Emit the start code first, without 'variable' in scope.
     Value* start_val = start->codegen();
     if (!start_val)
         return nullptr;
 
+    // Store the value into the alloca.
+    builder.CreateStore(start_val, alloca_var);
+
     // Make the new basic block for the loop header, inserting after current
     // block.
-    Function* the_function = builder.GetInsertBlock()->getParent();
-    BasicBlock* preheader_bb = builder.GetInsertBlock();
     BasicBlock* loop_bb = BasicBlock::Create(the_context, "loop", the_function);
 
     // Insert an explicit fall through from the current block to the loop_bb.
@@ -150,15 +207,10 @@ Value* For_expr_AST::codegen() {
     // Start insertion in loop_bb;
     builder.SetInsertPoint(loop_bb);
 
-    // Start the PHI node with an entry for start.
-    PHINode* variable = builder.CreatePHI(Type::getDoubleTy(the_context),
-                                          2, var_name.c_str());
-    variable->addIncoming(start_val, preheader_bb);
-
     // Within the loop, the variable is defined equal to the PHI node. If it
     // shadows an existing variable, we have to restore it, so save it now.
-    Value* old_val = named_values[var_name];
-    named_values[var_name] = variable;
+    AllocaInst* old_val = named_values[var_name];
+    named_values[var_name] = alloca_var;
 
     // Emit the body of the loop. This, like any other expr, can change the
     // current BB. Note that we ignore the value computed by the body, but
@@ -176,12 +228,16 @@ Value* For_expr_AST::codegen() {
         // If not specified, use 1.0.
         step_val = ConstantFP::get(the_context, APFloat(1.0));
 
-    Value* next_var = builder.CreateFAdd(variable, step_val, "nextvar");
-
     // Compute the end condition.
     Value* end_cond = end->codegen();
     if (!end_cond)
         return nullptr;
+
+    // Reload, increment and restore the alloca. This handles the case where the
+    // body of the loop mutates the variable.
+    Value* cur_var = builder.CreateLoad(alloca_var, var_name.c_str());
+    Value* next_var = builder.CreateFAdd(cur_var, step_val, "nextvar");
+    builder.CreateStore(next_var, alloca_var);
 
     // Convert condition to a bool by comparing non-equal to 0.0.
     end_cond = builder.CreateFCmpONE(end_cond,
@@ -189,7 +245,6 @@ Value* For_expr_AST::codegen() {
                                      "loopcond");
 
     // Create the "after loop" block and insert it.
-    BasicBlock* loop_end_bb = builder.GetInsertBlock();
     BasicBlock* after_bb =
             BasicBlock::Create(the_context, "afterloop", the_function);
 
@@ -198,9 +253,6 @@ Value* For_expr_AST::codegen() {
 
     // Any new code will be inserted inf after_bb.
     builder.SetInsertPoint(after_bb);
-
-    // Add a new entry tp the PHI node for the backedge.
-    variable->addIncoming(next_var, loop_end_bb);
 
     // Restore the unshadowed variable.
     if (old_val)
@@ -283,8 +335,17 @@ Function* Function_AST::codegen() {
 
     // Record the function arguments in the named_values map.
     named_values.clear();
-    for (auto& arg : the_function->args())
-        named_values[arg.getName()] = &arg;
+    for (auto& arg : the_function->args()) {
+        // Create an alloca for this variable.
+        AllocaInst* alloca_var = create_entry_block_alloca(the_function,
+                                                           arg.getName());
+
+        // Store the initial value into the alloca.
+        builder.CreateStore(&arg, alloca_var);
+
+        // Add argument to the variable symbol table.
+        named_values[arg.getName()] = alloca_var;
+    }
 
     if (Value* ret_val = body->codegen()) {
         // Finish off the function.
@@ -302,6 +363,52 @@ Function* Function_AST::codegen() {
     // Error reading the body, remove the function.
     the_function->eraseFromParent();
     return nullptr;
+}
+
+Value* Var_expr_AST::codegen() {
+    std::vector<AllocaInst*> old_bindings;
+
+    Function* the_function = builder.GetInsertBlock()->getParent();
+
+    // Register all variables and emit their initializer.
+    for (uint32_t i = 0, e = var_names.size(); i != e; i++) {
+        const std::string& var_name = var_names[i].first;
+        Expr_AST* init = var_names[i].second.get();
+
+        // Emit the initializer before adding the variable to scope, this
+        // prevents the initializer from referencing the variable itself.
+        Value* init_val;
+        if (init) {
+            init_val = init->codegen();
+            if (!init_val)
+                return nullptr;
+        } else
+            // If not specifier, use 0.0.
+            init_val = ConstantFP::get(the_context, APFloat(0.0));
+
+        AllocaInst* alloca_var = create_entry_block_alloca(the_function,
+                                                           var_name);
+        builder.CreateStore(init_val, alloca_var);
+
+        // Remember the old variable binding so that we can restore the
+        // binding when we unrecurse.
+        old_bindings.push_back(named_values[var_name]);
+
+        // Remember this binding.
+        named_values[var_name] = alloca_var;
+    }
+
+    // Codegen the body.
+    Value* body_val = body->codegen();
+    if (!body_val)
+        return nullptr;
+
+    // Pop all our variables from scope.
+    for (uint32_t i = 0, e = var_names.size(); i != e; i++)
+        named_values[var_names[i].first] = old_bindings[i];
+
+    // Return the body computation.
+    return body_val;
 }
 
 //===----------------------------------------------------------------------===//

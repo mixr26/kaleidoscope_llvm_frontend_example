@@ -38,6 +38,8 @@ int gettok() {
             return static_cast<int>(Token::TOK_BINARY);
         if (identifier_str == "unary")
             return static_cast<int>(Token::TOK_UNARY);
+        if (identifier_str == "var")
+            return static_cast<int>(Token::TOK_VAR);
         return static_cast<int>(Token::TOK_IDENTIFIER);
     }
 

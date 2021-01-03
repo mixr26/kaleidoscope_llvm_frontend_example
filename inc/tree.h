@@ -28,7 +28,7 @@ class Prototype_AST;
 extern LLVMContext the_context;
 extern std::unique_ptr<Module> the_module;
 extern IRBuilder<> builder;
-extern std::map<std::string, Value*> named_values;
+extern std::map<std::string, AllocaInst*> named_values;
 extern std::unique_ptr<legacy::FunctionPassManager> the_fpm;
 extern std::unique_ptr<KaleidoscopeJIT> the_jit;
 extern std::map<std::string, std::unique_ptr<Prototype_AST>> function_protos;
@@ -55,6 +55,8 @@ class Variable_expr_AST : public Expr_AST {
 
 public:
     Variable_expr_AST(const std::string& name) : name(name) {}
+    const std::string& get_name() const { return name; }
+
     Value* codegen() override;
 };
 
@@ -166,6 +168,19 @@ public:
                  std::unique_ptr<Expr_AST> body)
         : proto(std::move(proto)), body(std::move(body)) {}
     Function* codegen();
+};
+
+// Var_expr_AST - Expression class for var/in.
+class Var_expr_AST : public Expr_AST {
+    std::vector<std::pair<std::string, std::unique_ptr<Expr_AST>>> var_names;
+    std::unique_ptr<Expr_AST> body;
+
+public:
+    Var_expr_AST(std::vector<std::pair<std::string, std::unique_ptr<Expr_AST>>> var_names,
+                 std::unique_ptr<Expr_AST> body)
+        : var_names(std::move(var_names)), body(std::move(body)) {}
+
+    Value* codegen() override;
 };
 
 #endif // __TREE_H

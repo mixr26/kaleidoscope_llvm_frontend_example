@@ -8,6 +8,7 @@
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Utils.h"
 
 void initialize_module() {
     // Open a new module.
@@ -17,6 +18,8 @@ void initialize_module() {
     // Create a new pass manager attached to the module.
     the_fpm = std::make_unique<legacy::FunctionPassManager>(the_module.get());
 
+    // Promote allocas to registers.
+    the_fpm->add(createPromoteMemoryToRegisterPass());
     // Do simple "peephole" optimizations and bit-twiddling optzns.
     the_fpm->add(createInstructionCombiningPass());
     // Reassociate expressions.
