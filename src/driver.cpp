@@ -9,6 +9,12 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Utils.h"
+#include "llvm/Support/Host.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 
 void initialize_module() {
     // Open a new module.
@@ -107,4 +113,58 @@ void main_loop() {
             break;
         }
     }
+}
+
+void emit_object_code() {
+    // Initialize the target registry etc.
+    InitializeAllTargetInfos();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
+
+    auto target_triple = sys::getDefaultTargetTriple();
+    the_module->setTargetTriple(target_triple);
+
+    std::string error;
+    auto target = TargetRegistry::lookupTarget(target_triple, error);
+
+    if (!target) {
+        errs() << error;
+        return;
+    }
+
+    auto cpu = "generic";
+    auto features = "";
+
+    TargetOptions opt;
+    auto rm = Optional<Reloc::Model>();
+    auto the_target_machine =
+            target->createTargetMachine(target_triple, cpu, features, opt, rm);
+
+    the_module->setDataLayout(the_target_machine->createDataLayout());
+
+    auto filename = "output.o";
+    std::error_code ec;
+    raw_fd_ostream dest(filename, ec, sys::fs::OF_None);
+
+    if (ec) {
+        errs() << "Could not open file: " << ec.message();
+        return;
+    }
+
+    legacy::PassManager pass;
+    auto file_type = LLVMTargetMachine::CGFT_ObjectFile;
+
+    if (the_target_machine->addPassesToEmitFile(pass, dest, nullptr, file_type)) {
+        errs() << "Can't emit this type of file.";
+        return;
+    }
+
+    pass.run(*the_module);
+    dest.flush();
+
+    outs() << "Wrote " << filename << "\n";
+
+    return;
 }

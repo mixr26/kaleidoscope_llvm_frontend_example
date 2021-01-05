@@ -20,5 +20,8 @@ int main() {
     // Run the interpreter loop.
     main_loop();
 
+    // Emit the object code
+    emit_object_code();
+
     return 0;
 }
